@@ -1,0 +1,394 @@
+# Schody "pas startowy"
+
+esphome:
+  name: ws2812b-test
+
+esp8266:
+  board: esp01_1m
+
+wifi:
+  fast_connect: true
+  reboot_timeout: 0s
+  power_save_mode: none
+  ssid: "SSID_HOME"
+  password: "PASS"
+  manual_ip:
+    static_ip: 192.168.0.100
+    gateway: 192.168.100.1
+    subnet: 255.255.255.0
+    dns1: 1.1.1.1
+    dns2: 8.8.8.8
+
+logger:
+
+api:
+  password: "PASS"
+  reboot_timeout: 0s
+ota:
+  password: "PASS"
+
+web_server:
+  port: 80
+  auth:
+    username: admin
+    password: PASS
+
+sun:
+  latitude: 48.829444
+  longitude: 28.861389
+  on_sunrise:
+  - then:
+    - light.turn_on:
+       id: stairs
+       brightness: 40%
+       effect: 'Twinkle1'
+    - delay: 20s
+    - light.turn_off:
+       id: stairs
+  on_sunset:
+  - then:
+    - light.turn_on:
+       id: stairs
+       brightness: 40%
+       effect: 'Twinkle1'
+    - delay: 20s
+    - light.turn_off:
+       id: stairs
+
+time:
+ - platform: sntp
+   id: sntp_time
+   timezone: Europe/Warsaw
+   on_time_sync:
+     then:
+       - logger.log: "Synchronized system clock"
+#   servers:
+#      #- time.google.com
+#      - 216.239.35.0
+#      - 216.239.35.4
+#  - platform: homeassistant
+
+light:
+  - platform: neopixelbus
+    type: GRB
+#    type: GRBW
+    pin: GPIO3
+    num_leds: 317
+    variant: WS2812X
+    method: ESP8266_DMA # ESP8266_UART0
+    name: "Schody"
+    id: stairs
+    #invert: true
+    effects:
+      - addressable_twinkle:
+          name: Twinkle1
+          twinkle_probability: 20%
+          progress_interval: 5ms
+      - addressable_fireworks:
+          name: Fireworks
+          update_interval: 52ms
+          spark_probability: 20%
+          use_random_color: true
+          fade_out_rate: 120
+      - addressable_rainbow:
+          name: Rainbow Effect 1
+          speed: 10
+          width: 50
+      - addressable_rainbow:
+          name: Rainbow Effect 2
+          speed: 50
+          width: 50
+  - platform: partition
+    name: "step1"
+    id: step1
+    segments:
+      - id: stairs
+        from: 0
+        to: 36
+  - platform: partition
+    name: "step2"
+    id: step2
+    segments:
+      - id: stairs
+        from: 37
+        to: 74
+  - platform: partition
+    name: "step3"
+    id: step3
+    segments:
+      - id: stairs
+        from: 75
+        to: 129
+  - platform: partition
+    name: "step4"
+    id: step4
+    segments:
+      - id: stairs
+        from: 128
+        to: 182
+  - platform: partition
+    name: "step5"
+    id: step5
+    segments:
+      - id: stairs
+        from: 183
+        to: 220
+  - platform: partition
+    name: "step6"
+    id: step6
+    segments:
+      - id: stairs
+        from: 221
+        to: 258
+  - platform: partition
+    name: "step7"
+    id: step7
+    segments:
+      - id: stairs
+        from: 259
+        to: 296
+  - platform: partition
+    name: "step8"
+    id: step8
+    segments:
+      - id: stairs
+        from: 294
+        to: 316
+
+switch:
+  - platform: template
+    name: "schody_up"
+    id: schody_up
+    turn_on_action:
+      - light.turn_off:
+          id: stairs
+      - light.turn_on:
+          id: step1
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          id: step2
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          id: step3
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          id: step4
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          id: step5
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          id: step6
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          id: step7
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - light.turn_on:
+          id: step8
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 10s      ##########
+      - light.turn_off:
+          id: step1
+      - delay: 500ms
+      - light.turn_off:
+          id: step2
+      - delay: 500ms
+      - light.turn_off:
+          id: step3
+      - delay: 500ms
+      - light.turn_off:
+          id: step4
+      - delay: 500ms
+      - light.turn_off:
+          id: step5
+      - delay: 500ms
+      - light.turn_off:
+          id: step6
+      - delay: 500ms
+      - light.turn_off:
+          id: step7
+      - delay: 500ms
+      - light.turn_off:
+          id: step7
+      - delay: 500ms
+      - light.turn_on:
+          id: stairs
+          brightness: 70%
+          effect: 'Fireworks'
+      - delay: 10s
+      - light.turn_off:
+          id: stairs
+
+
+  - platform: template
+    name: "schody_down"
+    id: schody_down
+    turn_on_action:
+      - light.turn_off:
+          id: stairs
+      - light.turn_on:
+          #reverse: true
+          id: step8
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step7
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step6
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step5
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step4
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step3
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step2
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 500ms
+      - light.turn_on:
+          #reverse: true
+          id: step1
+          brightness: 60%
+          red: 100%
+          green: 100%
+          blue: 100%
+      - delay: 10s      ##########
+      - light.turn_off:
+          #reverse: true
+          id: step8
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step7
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step6
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step5
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step4
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step3
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step2
+      - delay: 500ms
+      - light.turn_off:
+          #reverse: true
+          id: step1
+      - delay: 500ms
+      - light.turn_on:
+          id: stairs
+          brightness: 50%
+          effect: 'Twinkle1'
+      - delay: 10s
+      - light.turn_off:
+          id: stairs
+
+binary_sensor:
+  - platform: gpio
+    pin: GPIO0       #D3
+    name: "Schody upper motion sensor"
+    device_class: motion
+    filters:
+      - delayed_on_off: 100ms
+    on_state:
+      then:
+#        - switch.turn_on: schody_up
+        - if:
+            condition:
+              - sun.is_below_horizon:
+            then:
+              - switch.turn_on: schody_up
+
+  - platform: gpio
+    pin: GPIO2       #D4
+    name: "Schody lower motion sensor"
+    device_class: motion
+    filters:
+      - delayed_on_off: 100ms
+    on_state:
+      then:
+ #       - switch.turn_on: schody_down
+        - if:
+            condition:
+              - sun.is_below_horizon:
+            then:
+              - switch.turn_on: schody_down
+
+
