@@ -1,0 +1,987 @@
+esphome:
+  name: pompa-ciepla
+
+  on_boot:
+    priority: -100
+    then:
+      - output.turn_on:
+          my_slow_pwm  
+      - output.set_level:
+          id: my_slow_pwm
+          level: "50%"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+# fast_connect: true
+#  reboot_timeout: 0s
+  power_save_mode: none
+  networks:
+  - ssid: "SSID_HOME"
+    password: "PASS"
+  - ssid: "SSID_HOME2"
+    password: "PASS"  
+#  use_address: devicename.lan
+  manual_ip:
+    static_ip: 192.168.196.20
+    gateway: 192.168.196.254
+    subnet: 255.255.255.0
+    dns1: 192.168.182.11
+    dns2: 172.16.110.57
+
+logger:
+
+api:
+  encryption:
+    key: "Whs4fJdmZ---key---BrFJWE9ZIcFUr2R3DhMV4="
+
+ota:
+  password: "1f27531---pass---18d9ede338f92b3"
+
+globals:
+  - id: defrost_time
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: runtime_kompresor
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: kompresor_runtime_human
+    type: int
+    restore_value: no
+    initial_value: '0'    
+  - id: runtime_fan1
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: runtime_fan2
+    type: int
+    restore_value: no
+    initial_value: '0'    
+  - id: runtime_defrost
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+
+  - id: stan_jedn_zew
+    type: float
+    restore_value: no
+    initial_value: '0'
+
+dallas:
+  - pin: GPIO22
+    update_interval: 15s  
+    id: temps1
+  - pin: GPIO21
+    update_interval: 15s
+    id: temps2
+
+i2c:
+  - id: bus_a
+    sda: GPIO27
+    scl: GPIO26
+    scan: true
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+sensor:
+  - platform: template
+    name: "Osuszacz PC"
+    id: tae_osuszacz
+    lambda: |-
+      return id(osuszacz).state;
+  - platform: template
+    id: kompresor_runtime
+    name: "Kompresor runtime"
+    update_interval: 10s
+    lambda: |-
+      if (id(kompresor_pompa_bufora).state) {
+        id(runtime_kompresor) += 10;
+      } else {
+        id(runtime_kompresor) = 0;
+      }
+      return id(runtime_kompresor);
+
+  - platform: template
+    id: kompresor_runtime_h
+    unit_of_measurement: "s"
+    accuracy_decimals: 0
+    name: "Czas pracy kompresora"
+    icon: "mdi:watering-can"
+    update_interval: 10s
+    lambda: |-
+      return id(kompresor_runtime).state;
+#    on_raw_value:
+#      then:
+#        - text_sensor.template.publish:
+#            id: kompresor_runtime_human
+#            state: !lambda |-
+#              int seconds = round(id(kompresor_runtime_h).raw_state);
+#              int minutes = seconds / 60;
+#              seconds = seconds % 60;
+#              return (
+#                (minutes ? String(minutes) + "m " : "") +
+#                (String(seconds) + "s")
+#              ).c_str();
+#        - component.update: my_display
+#    on_value_range:
+#      above: $max_czas_dzialania
+#      then:
+#        - switch.turn_off: zawor1
+
+  - platform: template
+    id: fan1_runtime
+    name: "Fan1 runtime"
+    update_interval: 10s
+    lambda: |-
+      if (id(fan1).state) {
+        id(runtime_fan1) += 10;
+      } else {
+        id(runtime_fan1) = 0;
+      }
+      return id(runtime_fan1);     
+  - platform: template
+    id: fan2_runtime
+    name: "Fan2 runtime"
+    update_interval: 10s
+    lambda: |-
+      if (id(fan2).state) {
+        id(runtime_fan2) += 10;
+      } else {
+        id(runtime_fan2) = 0;
+      }
+      return id(runtime_fan2);         
+  - platform: template
+    id: defrost_runtime
+    name: "Defrost runtime"
+    update_interval: 10s
+    lambda: |-
+      if (id(defrost).state) {
+        id(runtime_defrost) += 10;
+      } else {
+        id(runtime_defrost) = 0;
+      }
+      return id(runtime_defrost);       
+
+  - platform: dallas
+    dallas_id: temps1
+    address: 0x893ce10457c86f28
+    id: pc_temperatura_zew
+    name: Temperatura Zewnętrzna PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps1
+    address: 0x183ce10457832328
+    id: tbe
+    name: TBE PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps1  
+    address: 0xdc3ce10457ec6928
+    id: tae
+    name: TAE PC
+    filters:
+    - filter_out: nan    
+  - platform: dallas
+    dallas_id: temps1
+    address: 0xea000802b5af5d10
+    id: tcrc
+    name: TCRC - Kompresor PC
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - below: 92.0
+          then:
+            - script.execute:  mdv_start_fan2_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura Kompresora zmalała"
+        - above: 95.0
+          then:
+            - switch.turn_on: fan1
+            - switch.turn_on: fan2            
+            - logger.log:
+                level: ERROR
+                format: "Temperatura 1st Kompresora za wyskoa"
+        - above: 97.0
+          then:
+            - script.execute: mdv_stop_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura 2s Kompresora za wyskoa all OFF"                
+  - platform: dallas
+    dallas_id: temps1
+    address: 0x2a00080333e00310
+    id: tcrc2
+    name: TCRC - Kompresor PC2
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - below: 92.0
+          then:
+            - script.execute:  mdv_start_fan2_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura Kompresora zmalała"
+        - above: 95.0
+          then:
+            - switch.turn_on: fan1
+            - switch.turn_on: fan2            
+            - logger.log:
+                level: ERROR
+                format: "Temperatura 1st Kompresora za wyskoa"
+        - above: 97.0
+          then:
+            - script.execute: mdv_stop_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura 2s Kompresora za wyskoa all OFF"              
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0xa53ce10457fa9c28
+    id: tbc
+    name: TBC PC
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - below: 69.0
+          then:
+            - script.execute:  mdv_start_fan2_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura gazu zmalała"
+        - above: 70.0
+          then:
+            - switch.turn_on: fan1
+            - switch.turn_on: fan2            
+            - logger.log:
+                level: ERROR
+                format: "Temperatura gazu za wyskoa"        
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x1c3ce104579e3928
+    id: tac
+    name: TAC PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0xa1030594976b8b28
+    id: thi
+    name: THI PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x473ce104575e1328
+    id: tho
+    name: THO PC
+    filters:
+    - filter_out: nan    
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x493ce1045791d728
+    id: temperatura_bufora
+    name: Temperatura Bufora
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - above: 57.0
+          then:
+            - script.execute: mdv_stop_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura bufora wyskoa - stop MDV"
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x773ce10457911f28
+    id: temp_piec_na_drewno
+    name: Temperatura Pieca Na Drewno
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - above: 50.0
+          then:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(temp_piec_na_drewno).state > id(temperatura_bufora).state;
+                then:
+                  - switch.turn_on: pompa_piec_na_drewno
+                  - climate.control:
+                      id: piec_na_drewno
+                      mode: "COOL"
+            - if:
+                condition:
+                  lambda: |-
+                    return id(temp_piec_na_drewno).state < (id(temperatura_bufora).state - 3); 
+                then:    
+                  - climate.control:
+                      id: piec_na_drewno
+                      mode: "OFF"
+        - above: 85.0
+          then:
+            - switch.turn_on: pompa_piec_na_drewno
+            - climate.control:
+                id: piec_na_drewno
+                mode: "COOL"
+            - climate.control:
+                id: pompa_do_kotlowni
+                mode: "COOL"                
+            - homeassistant.service:
+                service: climate.set_hvac_mode
+                data:
+                  entity_id: climate.pompa_co_kaloryfery
+                  hvac_mode: "cool"                              
+            - logger.log:
+                level: ERROR
+                format: "Woda powyżej 85sC start termostatu pieca i pomp wymiennika"                
+        - above: 90.0
+          then:
+            - switch.turn_on: pompa_piec_na_drewno
+            - logger.log:
+                level: ERROR
+                format: "Woda powyżej 90sC Awaria!!! coś do dodania ??? "
+            - switch.turn_on: pompa_bufora_do_kotlowni                         # pompa transport do kotłowni ON                
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0xa1030094976b8b28
+    id: temperatura_solar
+    name: Temperatura Solar
+    filters:
+    - filter_out: nan
+    on_value:
+      then:
+        - if:
+            condition:
+              switch.is_off: manual_auto_co
+            then:                
+              - if:
+                  condition:
+                    lambda: |-
+                      return id(temperatura_solar).state > id(temperatura_bufora).state;
+                  then:
+                    - switch.turn_on: pompa_solar
+              - if:
+                  condition:
+                    lambda: |-
+                      return id(temperatura_solar).state < (id(temperatura_bufora).state-2); 
+                  then:    
+                    - switch.turn_off: pompa_solar                   
+
+  - platform: homeassistant
+    name: "MDV Temperatura w Salonie"
+    id: "salon_temp_termostat"
+    entity_id: sensor.temperatura_w_domu
+    filters:
+    - filter_out: nan
+    - heartbeat: 20s
+    - median:
+        window_size: 5
+  - platform: template
+    name: "Delta Tae - Tbe" # różnica  Tae - Tbe
+    accuracy_decimals: 2
+    update_interval: 60s
+    device_class: temperature
+    unit_of_measurement: °C
+    id: delta_tae_tbe
+    lambda: |-
+      return id(tae).state - id(tbe).state;
+  - platform: template
+    name: "Delta Tbc - Tac" # różnica  Tac - Tbc
+    accuracy_decimals: 2
+    update_interval: 60s
+    device_class: temperature
+    unit_of_measurement: °C
+    id: delta_tac_tbc
+    lambda: |-
+      return id(tbc).state - id(tac).state;
+  - platform: template
+    name: "Delta Tho - Thi" # różnica  Tae - Tbe
+    accuracy_decimals: 2
+    update_interval: 60s
+    device_class: temperature
+    unit_of_measurement: °C
+    id: delta_tho_thi
+    lambda: |-
+      return id(thi).state - id(tho).state;      
+ - platform: template
+    name: "Ɛg"             
+    accuracy_decimals: 2
+    update_interval: 120s
+    device_class: temperature
+    id: eg
+    lambda: |-
+      return (id(tbc).state - id(tae).state) / (id(tbc).state - id(tac).state) ;     
+
+  - platform: pzemac
+    address: 0x01  
+    current:
+      name: "MDV Prąd"
+      id: cur_mdv
+    voltage:
+      name: "MDV Napięcie"
+      id: vol
+    power:
+      name: "MDV Moc"
+      id: power_mdv
+      state_class: measurement
+    frequency:
+      name: "Częstotliwość Sieci MDV"
+      id: freq_mdv
+    power_factor:
+      name: "Współczynnik Mocy MDV"
+      id: pow_factor_mdv
+    update_interval: 5s
+
+  - platform: total_daily_energy
+    name: "Całkowita dzienna energia MDV"
+    power_id: power_mdv
+    id: daily_energy_total
+    filters:
+        # Multiplication factor from W to kW is 0.001
+      - multiply: 0.001
+    unit_of_measurement: kWh
+    icon: mdi:counter
+    accuracy_decimals: 1
+
+  - platform: integration
+    name: "Energy Meter MDV" 
+    sensor: power_mdv
+    time_unit: h
+    filters:
+     # Multiplication factor from W to kW is 0.001
+      - multiply: 0.001
+    unit_of_measurement: kWh
+    icon: mdi:counter
+
+daily_energy:
+    friendly_name: Pompa dzienne zużycie
+    unit_of_measurement: kWh
+    value_template: "{{ states('sensor.pompa_ciepla_t06_energy_today')|float| round(0) + states('sensor.pompa_ciepla_wew_energy_today')|float | round(0) }}"
+
+binary_sensor:
+  - platform: status
+    name: "MDV_F100_status"
+  - platform: gpio
+    pin:
+      number: GPIO14         #D14
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Auto"
+    id: mdv_auto
+    filters:
+      - invert:
+      - delayed_on: 20ms
+  - platform: gpio
+    pin:
+      number: GPIO15         #D15
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Defrost"
+    id: mdv_defrost
+    filters:
+      - invert:
+      - delayed_on: 20ms
+  - platform: gpio
+    pin:
+      number: GPIO4         #D4
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Run"
+    id: mdv_run
+    filters:
+      - invert:
+      - delayed_on: 20ms
+  - platform: gpio
+    pin:
+      number: GPIO5         #D5
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Time"
+    id: mdv_time
+    filters:
+      - invert:
+      - delayed_on: 20ms
+
+
+remote_transmitter:
+  pin: 
+    number: GPIO23
+  carrier_duty_percent: 50%
+
+uart:
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+  stop_bits: 1  
+
+pcf8574:
+  - id: 'pcf8574_hub'
+    #address: 0x21
+    address: 0x3F    
+    pcf8575: false
+
+switch:
+  - platform: restart
+    name: "PC Kontroler Restart"      
+  - platform: gpio
+    name: "Pompy Rohtenbach"
+    id: pompa_keg
+    icon: "mdi:engine"      
+    pin:
+      pcf8574: pcf8574_hub
+      number: 2
+      mode:
+        output: true
+      #inverted: true
+  - platform: gpio
+    name: "Pompa piec na drewno"
+    id: pompa_piec_na_drewno
+    icon: "mdi:engine"     
+    pin:
+      pcf8574: pcf8574_hub
+      number: 1
+      mode:
+        output: true
+      #inverted: true
+  - platform: gpio
+    name: "Pompa bufora do kotłowni"
+    id: pompa_bufora_do_kotlowni
+    icon: "mdi:engine"     
+    pin:
+      pcf8574: pcf8574_hub
+      number: 4
+      mode:
+        output: true
+      #inverted: true
+  - platform: gpio
+    name: "Pompa Solar"
+    id: pompa_solar
+    icon: "mdi:engine"     
+    pin:
+      number: GPIO19
+  - platform: gpio
+    name: "Kompresor i pompa bufora"
+    id: kompresor_pompa_bufora
+    icon: "mdi:engine"    
+    pin:
+      pcf8574: pcf8574_hub
+      number: 0
+      mode:
+        output: true
+  - platform: gpio
+    name: "FAN 1"
+    id: fan1    
+    icon: "mdi:fan"   
+    interlock: fan2   
+    pin:
+      pcf8574: pcf8574_hub
+      number: 6
+      mode:
+        output: true      
+  - platform: gpio
+    name: "FAN 2"
+    id: fan2    
+    icon: "mdi:fan"
+    interlock: fan1
+    pin:
+      pcf8574: pcf8574_hub
+      number: 5
+      mode:
+        output: true
+  - platform: gpio
+    name: "Grzanie / Defrost"
+    id: defrost    
+    icon: mdi:clipboard-flow   
+    pin:
+      pcf8574: pcf8574_hub
+      number: 3
+      mode:
+        output: true
+
+  - platform: template                      # wirtual switch tryb manual solar - https://forum.arturhome.pl/t/termostat-roznicowy-esphome/7238/29?page=2
+    id: manual_auto_solar
+    name: tryb manual solar
+    icon: mdi:gesture-tap
+    optimistic: true
+#    on_turn_on:
+#      - switch.turn_on: solar
+#      - light.turn_on:
+#          id: LED_solar
+#          effect: flash
+#    on_turn_off:
+#      - switch.turn_off: solar  
+#      - light.turn_off:
+#          id: LED_solar
+  - platform: template                      # wirtual switch tryb manual co
+    id: manual_auto_co
+    name: tryb manual co
+    icon: mdi:gesture-tap
+    optimistic: true
+#    on_turn_on:
+#      - switch.turn_off: pompa_co 
+#      - light.turn_on:
+#          id: LED_co
+#          effect: flash
+#    on_turn_off:
+#      - switch.turn_off: pompa_co  
+#      - light.turn_off:
+#          id: LED_co       
+  - platform: template  
+    id: mdv_test_start
+    name: MDV Test Start
+    icon: mdi:gesture-tap
+    turn_on_action:
+      - script.execute: mdv_start_script
+    optimistic: true
+  - platform: template  
+    id: mdv_test_stop
+    name: MDV Test Stop
+    icon: mdi:gesture-tap
+    turn_on_action:
+      - script.execute: mdv_stop_script
+    optimistic: true
+
+  - platform: template
+    id: current_8a
+    name: Prąd 8A
+    icon: mdi:gesture-tap
+    optimistic: true
+    turn_on_action:
+      - script.execute: mdv_current_8a_script
+    restore_mode: RESTORE_DEFAULT_OFF      
+
+  - platform: template
+    id: mdv_test_script
+    name: "mdv test script"
+    icon: mdi:gesture-tap
+    optimistic: true
+    turn_on_action:
+      - script.execute:  mdv_start_below_tmperature_script
+      - logger.log:
+          level: ERROR
+          format: "Temperatura Kompresora zmalała"   
+
+  - platform: template
+    name: "Termostat wymiennika Kotłownia ON"  # Grzanie Z Pieca na drewno
+    id: termostat_wymiennika_kotlownia_k_on
+    turn_on_action:
+      then:
+        - homeassistant.service:
+            service: climate.set_hvac_mode
+            data:
+              entity_id: climate.pompa_co_kaloryfery
+              hvac_mode: "cool"
+  - platform: template
+    name: "Termostat wymiennika Kotłownia OFF"  # Grzanie gazowe
+    id: termostat_wymiennika_kotlownia_k_off
+    turn_on_action:
+      then:
+        - homeassistant.service:
+            service: climate.set_hvac_mode
+            data:
+              entity_id: climate.pompa_co_kaloryfery
+              hvac_mode: "off"
+
+output:
+    platform: slow_pwm
+    pin:
+      pcf8574: pcf8574_hub
+      number: 7
+      mode:
+        output: true
+      inverted: false
+    id: my_slow_pwm
+    period: 1000ms  
+
+interval:
+  - interval: 64 s                          # Zabezpieczenie pieca na drewno
+    then:
+    - lambda: |-
+          if (id(temp_piec_na_drewno).state > 47 && id(temp_piec_na_drewno).state > id(temperatura_bufora).state) {
+            id(termostat_piec_co_start_script).trigger();
+            //id(pompa_piec_na_drewno).turn_on();
+          }
+
+  - interval: 65 s                          # piec chłodniejszy od bufora
+    then:
+      - lambda: |-
+          if (id(temp_piec_na_drewno).state < id(temperatura_bufora).state && id(pompa_piec_na_drewno).state) {
+            id(termostat_piec_co_stop_script).trigger();
+            id(pompa_piec_na_drewno).turn_off();
+          } 
+  - interval: 66 s                          # Zabezpieczenie pieca na drewno 80sC
+    then:
+    - lambda: |-
+          if (id(temp_piec_na_drewno).state > 85) {
+            id(termostat_piec_co_start_script).trigger();
+            id(termostat_pompa_do_kotlowni_start_script).trigger();
+            id(pompa_piec_na_drewno).turn_on();
+            id(pompa_bufora_do_kotlowni).turn_on();
+            id(termostat_wymiennika_kotlownia_k_on).turn_on();
+            
+          }          
+
+  - interval: 128s                           # Zabezpieczenie kompresora
+    then:
+      - lambda: |-
+          if (id(tcrc).state > 97) {
+            id(mdv_stop_script).trigger();
+          }
+
+  - interval: 128s                           # Zabezpieczenie gazu
+    then:
+      - lambda: |-
+          if (id(tbc).state > 86) {
+            id(mdv_stop_script).trigger();
+          }
+  - interval: 20s  # Mały prąd
+    then:
+      - delay: 3 s
+      - lambda: |-
+          if (id(pc_automatyka).mode == CLIMATE_MODE_HEAT && id(kompresor_runtime).state > 120 && id(cur_mdv).state < 8 && id(kompresor_pompa_bufora).state && !id(current_8a).state) {
+            id(current_8a).turn_on();
+          }
+  - interval: 3s  # Duży prąd
+    then:
+      - lambda: |-
+          if (id(cur_mdv).state > 15 ) {
+            id(kompresor_pompa_bufora).turn_off();
+            id(fan1).turn_off();
+            id(fan2).turn_off();      
+          }
+
+  - interval: 20s  # Defrost
+    then:
+      - lambda: |-
+          if (id(pc_automatyka).mode == CLIMATE_MODE_HEAT && id(kompresor_runtime).state > 300 && id(delta_tac_tbc).state < 4 && id(kompresor_pompa_bufora).state && !id(current_8a).state) {
+            id(defrost_time)= true;
+            id(current_8a).turn_on();
+          }
+
+script:
+  - id: termostat_piec_co_start_script
+    then:
+      - climate.control:
+          id: piec_na_drewno
+          mode: "COOL"
+  - id: termostat_piec_co_stop_script
+    then:
+      - climate.control:
+          id: piec_na_drewno
+          mode: "OFF"
+  - id: termostat_pompa_do_kotlowni_start_script
+    then:
+      - climate.control:
+          id: pompa_do_kotlowni
+          mode: "COOL"          
+  - id: mdv_current_8a_script 
+    then:
+      - switch.turn_off: kompresor_pompa_bufora
+      - switch.turn_off: fan1
+      - switch.turn_off: fan2      
+      - delay: 20 s      
+      - switch.turn_off: defrost
+      - delay: 3 s      
+      - switch.turn_on: kompresor_pompa_bufora
+      - delay: 2 min
+      - switch.turn_on: fan2
+      - delay: 2 s       
+      - switch.turn_off: fan2
+      - delay: 3 s 
+      - switch.turn_on: fan2
+      - delay: 3 s
+      - switch.turn_off: fan2
+      - delay: 3 s 
+      - switch.turn_on: fan2
+      - delay: 3 s
+      - switch.turn_off: fan2        
+      - switch.turn_off: kompresor_pompa_bufora
+      - delay: 40 s            
+      - switch.turn_on: defrost
+      - delay: 2 min      
+      - switch.turn_on: kompresor_pompa_bufora
+      - delay: 3 s
+      - switch.turn_on: fan1      
+      - switch.turn_off: current_8a
+  - id: mdv_start_script
+    then:
+      - script.stop: mdv_current_8a_script
+      - switch.turn_on: defrost
+      - delay: 5 s
+      - switch.turn_on: fan1
+      - delay: 3 s
+      - switch.turn_on: kompresor_pompa_bufora
+  - id: mdv_stop_script
+    then:
+      - script.stop: mdv_current_8a_script
+      - switch.turn_off: kompresor_pompa_bufora
+      - delay: 3 s
+      - switch.turn_off: fan1
+      - switch.turn_off: fan2      
+      - delay: 3 min                  
+      - switch.turn_off: defrost
+  - id: mdv_start_fan2_script
+    then:
+      - lambda: |-      
+          if (id(pc_automatyka).mode == CLIMATE_MODE_HEAT) { 
+            id(fan2).turn_on();    
+          }           
+  - id: mdv_start_below_tmperature_script
+    then:
+      - delay: 3s      
+      - lambda: |-
+          if (id(pc_automatyka).mode == CLIMATE_MODE_HEAT) {
+            id(defrost).turn_on(); 
+            id(fan2).turn_on();    
+          }      
+      - delay: 3s
+      - lambda: |-
+          if (id(pc_automatyka).mode == CLIMATE_MODE_HEAT) {
+            id(kompresor_pompa_bufora).turn_on();  
+            ESP_LOGW("pompa_ciepla", "Ponowne właczenie sprężarki temp. spadła");
+          }
+
+web_server:
+  port: 80
+  auth:
+    username: admin
+    password: PASS 
+
+climate:
+  - platform: bang_bang
+    name: "Bufor"
+    id: pc_automatyka
+    sensor: temperatura_bufora
+    default_target_temperature_low: 30 °C
+    default_target_temperature_high: 56 °C
+    heat_action:
+      - logger.log:
+          level: WARN
+          format: "AUTOMATION HEAT / Automatyka grzania włączona - pompa pracuje"
+      - switch.turn_on: defrost
+      - delay: 5 s
+      - switch.turn_on: fan1
+      - delay: 3 s
+      - switch.turn_on: kompresor_pompa_bufora
+      #- climate.control:
+      #    id: PC_grzalka
+      #    mode: "HEAT"          
+    idle_action:
+      - logger.log:
+          level: WARN
+          format: "AUTOMATION IDLE / Automatyka grzania włączona - pompa nie pracuje"
+      - switch.turn_off: kompresor_pompa_bufora
+      - delay: 3 s
+      - switch.turn_off: fan1
+      - switch.turn_off: fan2      
+      - delay: 3 min                  
+      - switch.turn_off: defrost
+      - delay: 3 s                 
+      #- climate.control:
+      #    id: PC_grzalka
+      #    mode: "OFF"                       
+    visual:
+      min_temperature: 30
+      max_temperature: 60
+
+  - platform: thermostat
+    name: "PIEC Na Drewno"
+    id: piec_na_drewno
+    min_cooling_off_time: 60s
+    min_cooling_run_time: 60s
+    sensor: temp_piec_na_drewno
+    min_idle_time: 30s
+    cool_action:
+      - switch.turn_on: pompa_piec_na_drewno              
+      - logger.log:
+          level: WARN
+          format: "Start Cool - Pompa Pieca Na Drewno włączona"
+#      - climate.control:
+#          id: pompa_do_kotlowni
+#          mode: "cool"          
+#      - switch.turn_on: termostat_wymiennika_kotlownia_k_on
+#      - logger.log:
+#          level: WARN
+#          format: "Start Cool - termostat wymiennika w kotłowni on"                
+    idle_action:
+      - switch.turn_off: pompa_piec_na_drewno           
+      - logger.log:
+          level: WARN
+          format: "STOP - Pompa Pieca Na Drewno wyłączona"
+    default_preset: PIEC Na Drewno
+    preset:
+      - name: PIEC Na Drewno
+        default_target_temperature_high: 50 °C
+    visual:
+      min_temperature: 35 °C
+      max_temperature: 80 °C
+      temperature_step: 5 °C
+
+  - platform: thermostat
+    name: "Pompa do kotlowni"
+    id: pompa_do_kotlowni
+    min_cooling_off_time: 20s
+    min_cooling_run_time: 20s
+    sensor: temperatura_bufora
+    min_idle_time: 10s
+    cool_action:
+      - switch.turn_on: pompa_bufora_do_kotlowni      # pompa transport do kotłowni ON          
+      - logger.log:
+          level: WARN
+          format: "Start Cool - Pompa Pieca Na Drewno włączona"
+    idle_action:
+      - switch.turn_off: pompa_bufora_do_kotlowni     # pompa transport do kotłowni ON            
+      - logger.log:
+          level: WARN
+          format: "STOP - Pompa do kotłowni wyłączona"
+    default_preset: Pompa do kotlowni
+    preset:
+      - name: Pompa do kotlowni
+        default_target_temperature_high: 45 °C
+    visual:
+      min_temperature: 35 °C
+      max_temperature: 100 °C
+      temperature_step: 2 °C
+
+#### Programowanie ############################################################################################################################################
+#   esptool.py --chip esp32 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dout --flash_size detect 0x0 pompa-factory.bin 
+###############################################################################################################################################################  
+
+# https://avrhelp.mcselec.com/index.html?lcd_i2c_pcf8574.htm
+#
+# 1
+# 2
+# 3
+# 4    0  Kompresor
+# 5    1  Pompa piec na drewno
+# 6    2  Pompy Rohtenbach
+# 7    3  Defrost
+# 8
+# 9
+# 10
+# 11   4  Pompa bufora do kotłowni
+# 12   5  FAN1
+# 13   6  FAN2
+# 14   7  LED
+# 15
+# 16
+
