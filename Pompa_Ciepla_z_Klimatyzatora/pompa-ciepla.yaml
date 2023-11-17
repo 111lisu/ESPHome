@@ -1,0 +1,843 @@
+esphome:
+  name: pompa-ciepla
+
+  on_boot:
+    priority: -100
+    then:
+      - output.turn_on:
+          my_slow_pwm  
+      - output.set_level:
+          id: my_slow_pwm
+          level: "50%"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+# fast_connect: true
+#  reboot_timeout: 0s
+  power_save_mode: none
+  networks:
+  - ssid: "IoT-N"
+    password: "AgmXYNIcv"
+  - ssid: "Garage"
+    password: "hassio2020."  
+#  use_address: devicename.lan
+  manual_ip:
+    static_ip: 192.168.196.20
+    gateway: 192.168.196.254
+    subnet: 255.255.255.0
+    dns1: 192.168.182.11
+    dns2: 172.16.110.57
+
+logger:
+
+api:
+  encryption:
+    key: "Whs4fJdmZg15Jc2aAHvHt5BrFJWE9ZIcFUr2R3DhMV4="
+
+ota:
+  password: "1f275315c91d5317b18d9ede338f92b3"
+
+
+dallas:
+  - pin: GPIO22
+    update_interval: 15s  
+    id: temps1
+  - pin: GPIO21
+    update_interval: 15s
+    id: temps2
+
+i2c:
+  - id: bus_a
+    sda: GPIO27
+    scl: GPIO26
+    scan: true
+
+time:
+  - platform: homeassistant
+    id: esptime
+
+#Connecting two configured DS18B20 will freeze the NodeMcu with ESPHOME. If one of the sensors is disconnected, the other one is functional and I see the value.
+#address: 0x3F030997792F5828
+#name: "Temperature #1"
+#platform: dallas
+#address: 0xD703139779A28828
+#name: "Temperature #2"
+
+sensor:
+  - platform: dallas
+    dallas_id: temps1
+    address: 0x893ce10457c86f28
+    id: pc_temperatura_zew
+    name: Temperatura Zewnętrzna PC
+    filters:
+    - filter_out: nan
+
+  - platform: dallas
+    dallas_id: temps1
+    address: 0xea000802b5af5d10
+    id: tcrc
+    name: TCRC - Kompresor PC
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - above: 97.0
+          then:
+            - script.execute: mdv_stop_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura Kompresora za wyskoa"
+        - below: 75.0
+          then:
+            - script.execute:  mdv_start_below_tmperature_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura Kompresora zmalała"
+  - platform: dallas
+    dallas_id: temps1
+    address: 0x2a00080333e00310
+    id: tcrc2
+    name: TCRC - Kompresor PC2
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - above: 97.0
+          then:
+            - script.execute: mdv_stop_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura Kompresora za wyskoa"
+        - below: 75.0
+          then:
+            - script.execute:  mdv_start_below_tmperature_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura Kompresora zmalała"               
+  - platform: dallas
+    dallas_id: temps1
+    address: 0x183ce10457832328
+    id: tbe
+    name: TBE PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps1  
+    address: 0xdc3ce10457ec6928
+    id: tae
+    name: TAE PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0xa53ce10457fa9c28
+    id: tbc
+    name: TBC PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x1c3ce104579e3928
+    id: tac
+    name: TAC PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0xa1030594976b8b28
+    id: thi
+    name: THI PC
+    filters:
+    - filter_out: nan
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x473ce104575e1328
+    id: tho
+    name: THO PC
+    filters:
+    - filter_out: nan    
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x493ce1045791d728
+    id: temperatura_bufora
+    name: Temperatura Bufora
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - above: 57.0
+          then:
+            - script.execute: mdv_stop_script
+            - logger.log:
+                level: ERROR
+                format: "Temperatura bufora wyskoa - stop MDV"
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0x773ce10457911f28
+    id: temp_piec_na_drewno
+    name: Temperatura Pieca Na Drewno
+    filters:
+    - filter_out: nan
+    on_value_range:
+        - above: 50.0
+          then:
+            - switch.turn_on: pompa_piec_na_drewno
+            - climate.control:
+                id: piec_na_drewno
+                mode: "COOL"
+            - logger.log:
+                level: ERROR
+                format: "Woda powyżej 50sC start termostatu pieca"
+        - above: 90.0
+          then:
+            - switch.turn_on: pompa_piec_na_drewno
+            - logger.log:
+                level: ERROR
+                format: "Woda powyżej 90sC Awaria!!! coś do dodania ??? "
+            - switch.turn_on: pompa_bufora_do_kotlowni                         # pompa transport do kotłowni ON                
+  - platform: dallas
+    dallas_id: temps2  
+    address: 0xa1030094976b8b28
+    id: temperatura_solar
+    name: Temperatura Solar
+    filters:
+    - filter_out: nan
+    on_value:
+      then:
+        - if:
+            condition:
+              switch.is_off: manual_auto_co
+            then:                
+              - if:
+                  condition:
+                    lambda: |-
+                      return id(temperatura_solar).state > id(temperatura_bufora).state;
+                  then:
+                    - switch.turn_on: pompa_solar
+              - if:
+                  condition:
+                    lambda: |-
+                      return id(temperatura_solar).state < (id(temperatura_bufora).state-2); 
+                  then:    
+                    - switch.turn_off: pompa_solar                   
+
+  - platform: homeassistant
+    name: "MDV Temperatura w Salonie"
+    id: "salon_temp_termostat"
+    entity_id: sensor.temperatura_w_domu
+    filters:
+    - filter_out: nan
+    - heartbeat: 20s
+    - median:
+        window_size: 5
+  - platform: template
+    name: "Delta Tae - Tbe" # różnica  Tae - Tbe
+    accuracy_decimals: 2
+    update_interval: 60s
+    device_class: temperature
+    unit_of_measurement: °C
+    id: delta_tae_tbe
+    lambda: |-
+      return id(tbe).state - id(tae).state;
+  - platform: template
+    name: "Delta Tbc - Tac" # różnica  Tac - Tbc
+    accuracy_decimals: 2
+    update_interval: 60s
+    device_class: temperature
+    unit_of_measurement: °C
+    id: delta_tac_tbc
+    lambda: |-
+      return id(tbc).state - id(tac).state;
+  - platform: template
+    name: "Delta Tho - Thi" # różnica  Tae - Tbe
+    accuracy_decimals: 2
+    update_interval: 60s
+    device_class: temperature
+    unit_of_measurement: °C
+    id: delta_tho_thi
+    lambda: |-
+      return id(tho).state - id(thi).state;      
+    # https://www.youtube.com/watch?v=VZMHBXioG-s  - Przegrzanie i przechłodzenie 
+    # Ɛg - (COP test) - https://www.youtube.com/watch?v=1mzZCI73By0&t=710s  
+    # To jest pierwszy z czterech sposobów, które liczą COP bez pomiaru przepływu. Ten jest ekstremalny jeśli chodzi o uzyski.
+  - platform: template
+    name: "Ɛg"             
+    accuracy_decimals: 2
+    update_interval: 120s
+    device_class: temperature
+    id: eg
+    lambda: |-
+      return (id(tbc).state - id(tae).state) / (id(tbc).state - id(tac).state) ;     
+
+  - platform: pzemac
+    address: 0x01  
+    current:
+      name: "MDV Prąd"
+      id: cur_mdv
+    voltage:
+      name: "MDV Napięcie"
+      id: vol
+    power:
+      name: "MDV Moc"
+      id: power_mdv
+      state_class: measurement
+    frequency:
+      name: "Częstotliwość Sieci MDV"
+      id: freq_mdv
+    power_factor:
+      name: "Współczynnik Mocy MDV"
+      id: pow_factor_mdv
+    update_interval: 5s
+
+  - platform: total_daily_energy
+    name: "Całkowita dzienna energia MDV"
+    power_id: power_mdv
+    id: daily_energy_total
+    filters:
+        # Multiplication factor from W to kW is 0.001
+      - multiply: 0.001
+    unit_of_measurement: kWh
+    icon: mdi:counter
+    accuracy_decimals: 1
+
+  - platform: integration
+    name: "Energy Meter MDV" 
+    sensor: power_mdv
+    time_unit: h
+    filters:
+     # Multiplication factor from W to kW is 0.001
+      - multiply: 0.001
+    unit_of_measurement: kWh
+    icon: mdi:counter
+
+#daily_energy:
+#    friendly_name: Pompa dzienne zużycie
+#    unit_of_measurement: kWh
+#    value_template: "{{ states('sensor.pompa_ciepla_t06_energy_today')|float| round(0) + states('sensor.pompa_ciepla_wew_energy_today')|float | round(0) }}"
+
+binary_sensor:
+  - platform: status
+    name: "MDV_F100_status"
+  - platform: gpio
+    pin:
+      number: GPIO14         #D14
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Auto"
+    id: mdv_auto
+    filters:
+      - invert:
+      - delayed_on: 20ms
+  - platform: gpio
+    pin:
+      number: GPIO15         #D15
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Defrost"
+    id: mdv_defrost
+    filters:
+      - invert:
+      - delayed_on: 20ms
+  - platform: gpio
+    pin:
+      number: GPIO4         #D4
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Run"
+    id: mdv_run
+    filters:
+      - invert:
+      - delayed_on: 20ms
+  - platform: gpio
+    pin:
+      number: GPIO5         #D5
+      mode:
+        input: true
+        pullup: true      
+      inverted: True     
+    name: "MDV F100 Time"
+    id: mdv_time
+    filters:
+      - invert:
+      - delayed_on: 20ms
+
+  - platform: gpio
+    name: "Kompresor"
+    id: kompresor
+    icon: "mdi:engine"    
+    pin:
+      pcf8574: pcf8574_hub
+      number: 0
+      mode: INPUT
+      inverted: true
+  - platform: gpio
+    name: "FAN 1"
+    id: fan1    
+    icon: "mdi:fan"    
+    pin:
+      pcf8574: pcf8574_hub
+      number: 6
+      mode: INPUT
+      inverted: true      
+  - platform: gpio
+    name: "FAN 2"
+    id: fan2    
+    icon: "mdi:fan"    
+    pin:
+      pcf8574: pcf8574_hub
+      number: 5
+      mode: INPUT
+      inverted: true
+  - platform: gpio
+    name: "Defrost"
+    id: defrost    
+    icon: mdi:clipboard-flow   
+    pin:
+      pcf8574: pcf8574_hub
+      number: 3
+      mode: INPUT
+      inverted: true
+
+remote_transmitter:
+  pin: 
+    number: GPIO23
+  carrier_duty_percent: 50%
+
+uart:
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+  stop_bits: 1  
+
+pcf8574:
+  - id: 'pcf8574_hub'
+    #address: 0x21
+    address: 0x3F    
+    pcf8575: false
+
+switch:
+  - platform: restart
+    name: "PC Kontroler Restart"      
+  - platform: template
+    icon: "mdi:car-seat-cooler"  
+    id: mdv_start
+    name: MDV Start
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24D3FC0BC43
+  - platform: template
+#    icon: "mdi:car-seat-cooler"  
+    id: mdv_stop
+    name: MDV Stop
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24D7B84E01F
+  - platform: template
+#    icon: "mdi:car-seat-cooler"  
+    id: mdv_cooling
+    name: MDV Chłodzenie
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24D9F6000FF
+  - platform: template
+    icon: "mdi:car-seat-heater"  
+    id: mdv_warming
+    name: MDV Grzanie
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24D9F600CF3            
+  - platform: template
+    icon: "mdi:power-standby"  
+    id: mdv_on
+    name: MDV ON  
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24DBF40D02F
+         #rc_code_2: 0xD5660001003C          
+  - platform: template
+    icon: "mdi:power-off"     #https://pictogrammers.github.io/@mdi/font/5.3.45/
+    id: mdv_off
+    name: MDV OFF    
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24D7B84E01F
+  - platform: template
+    icon: "mdi:temperature-celsius"  
+    id: mdv_29
+    name: "MDV + 29 °C"    
+    turn_on_action:  
+      - remote_transmitter.transmit_toshiba_ac:
+          rc_code_1: 0xB24D9F60A05F
+
+#  - platform: gpio
+#    name: "Pompa Wymiennika Gazowego"
+#    id: pompa_wymiennika_gaz
+#    icon: "mdi:engine"      
+#    pin:
+#      pcf8574: pcf8574_hub
+#      number: 0
+#      mode:
+#        output: true
+#      #inverted: false
+#  - platform: gpio
+#    name: "Pompa 1"
+#    id: pompa_keg1
+#    icon: "mdi:engine"      
+#    pin:
+#      pcf8574: pcf8574_hub
+#      number: 3
+#      mode:
+#        output: true
+#      #inverted: true
+  - platform: gpio
+    name: "Pompy Rohtenbach"
+    id: pompa_keg
+    icon: "mdi:engine"      
+    pin:
+      pcf8574: pcf8574_hub
+      number: 2
+      mode:
+        output: true
+      #inverted: true
+  - platform: gpio
+    name: "Pompa piec na drewno"
+    id: pompa_piec_na_drewno
+    icon: "mdi:engine"     
+    pin:
+      pcf8574: pcf8574_hub
+      number: 1
+      mode:
+        output: true
+      #inverted: true
+  - platform: gpio
+    name: "Pompa bufora do kotłowni"
+    id: pompa_bufora_do_kotlowni
+    icon: "mdi:engine"     
+    pin:
+      pcf8574: pcf8574_hub
+      number: 4
+      mode:
+        output: true
+      #inverted: true
+  - platform: gpio
+    name: "Pompa Solar"
+    id: pompa_solar
+    icon: "mdi:engine"     
+    pin:
+      number: GPIO19      
+#      pcf8574: pcf8574_hub
+#      number: 5
+#      mode:
+#        output: true
+#      #inverted: true
+
+  - platform: template                      # wirtual switch tryb manual solar - https://forum.arturhome.pl/t/termostat-roznicowy-esphome/7238/29?page=2
+    id: manual_auto_solar
+    name: tryb manual solar
+    icon: mdi:gesture-tap
+    optimistic: true
+#    on_turn_on:
+#      - switch.turn_on: solar
+#      - light.turn_on:
+#          id: LED_solar
+#          effect: flash
+#    on_turn_off:
+#      - switch.turn_off: solar  
+#      - light.turn_off:
+#          id: LED_solar
+  - platform: template                      # wirtual switch tryb manual co
+    id: manual_auto_co
+    name: tryb manual co
+    icon: mdi:gesture-tap
+    optimistic: true
+#    on_turn_on:
+#      - switch.turn_off: pompa_co 
+#      - light.turn_on:
+#          id: LED_co
+#          effect: flash
+#    on_turn_off:
+#      - switch.turn_off: pompa_co  
+#      - light.turn_off:
+#          id: LED_co       
+
+  - platform: template
+    id: mdv_test_script
+    name: "mdv test script"
+    icon: mdi:gesture-tap
+    optimistic: true
+    turn_on_action:
+      - script.execute:  mdv_start_below_tmperature_script
+      - logger.log:
+          level: ERROR
+          format: "Temperatura Kompresora zmalała"   
+
+  - platform: template
+    name: "Termostat wymiennika Kotłownia ON"  # Grzanie Z Pieca na drewno
+    id: termostat_wymiennika_kotlownia_k_on
+    turn_on_action:
+      then:
+        - homeassistant.service:
+            service: climate.set_hvac_mode
+            data:
+              entity_id: climate.pompa_co_kaloryfery
+              hvac_mode: "cool"
+  - platform: template
+    name: "Termostat wymiennika Kotłownia OFF"  # Grzanie gazowe
+    id: termostat_wymiennika_kotlownia_k_off
+    turn_on_action:
+      then:
+        - homeassistant.service:
+            service: climate.set_hvac_mode
+            data:
+              entity_id: climate.pompa_co_kaloryfery
+              hvac_mode: "off"
+
+output:
+    platform: slow_pwm
+    pin:
+      pcf8574: pcf8574_hub
+      number: 7
+      mode:
+        output: true
+      inverted: false
+    id: my_slow_pwm
+    period: 1000ms  
+
+interval:
+  - interval: 120 s                    # Zabezpieczenie pompy pieca na drewno
+    then:
+    - lambda: |-
+          if (id(temp_piec_na_drewno).state > 60) {
+            id(pompa_piec_na_drewno).turn_on();
+          }
+#  - interval: 120 s                    # Zabezpieczenie bufora
+#    then:
+#    - lambda: |-
+#          if (id(temperatura_bufora).state > 60 && (id(pompa_wymiennika_gaz).state)) {
+#            id(mdv_stop).turn_on();
+#          }
+  - interval: 128 s                    # Zabezpieczenie kompresora
+    then:
+    - lambda: |-
+          if (id(tcrc).state > 100) {
+            id(mdv_stop).turn_on();
+          }
+  - interval: 128 s                    # Zabezpieczenie gazu
+    then:
+    - lambda: |-
+          if (id(tbc).state > 90) {
+            id(mdv_stop).turn_on();
+          }                   
+
+script:
+  - id: mdv_start_script
+    then:
+      - switch.turn_on: mdv_29
+      - delay: 3s      
+      - switch.turn_on: mdv_start
+  - id: mdv_stop_script
+    then:
+      - delay: 1s      
+      - switch.turn_on: mdv_stop
+  - id: mdv_start_below_tmperature_script
+    then:
+      - delay: 3s      
+      - lambda: |-
+          if (id(pc_automatyka).mode == CLIMATE_MODE_HEAT) {
+            id(mdv_29).turn_on(); 
+            id(mdv_start).turn_on();
+            ESP_LOGW("pompa_ciepla", "Ponowne właczenie sprężarki");     
+          }      
+
+web_server:
+  port: 80
+  auth:
+    username: admin
+    password: CapsLock
+
+climate:
+  - platform: bang_bang
+    name: "Bufor"
+    id: pc_automatyka
+    sensor: temperatura_bufora
+    default_target_temperature_low: 30 °C
+    default_target_temperature_high: 56 °C
+    heat_action:
+      - logger.log:
+          level: WARN
+          format: "AUTOMATION HEAT / Automatyka grzania włączona - pompa pracuje"
+#      - switch.turn_on: pompa_wymiennika_gaz
+      - script.execute: mdv_start_script
+#      - climate.control:
+#          id: pompa_do_kotlowni
+#          mode: "cool"       
+      #- climate.control:
+      #    id: PC_grzalka
+      #    mode: "HEAT"          
+    idle_action:
+      - logger.log:
+          level: WARN
+          format: "AUTOMATION IDLE / Automatyka grzania włączona - pompa nie pracuje"
+      #- switch.turn_off: mdv_stop               # Stop klimatyzatora IRED
+      - script.execute: mdv_stop_script
+      - delay: 5 s
+      - switch.turn_off: mdv_stop               # Stop klimatyzatora IRED
+      - script.execute: mdv_stop_script       
+      - delay: 20 s                  
+#      - switch.turn_off: pompa_wymiennika_gaz
+      #- climate.control:
+      #    id: PC_grzalka
+      #    mode: "OFF"                       
+    visual:
+      min_temperature: 30
+      max_temperature: 60
+
+  - platform: thermostat
+    name: "PIEC Na Drewno"
+    id: piec_na_drewno
+    min_cooling_off_time: 60s
+    min_cooling_run_time: 60s
+    sensor: temp_piec_na_drewno
+    min_idle_time: 30s
+    cool_action:
+      - switch.turn_on: pompa_piec_na_drewno
+      - climate.control:
+          id: pompa_do_kotlowni
+          mode: "cool"               
+      - logger.log:
+          level: WARN
+          format: "Start Cool - Pompa Pieca Na Drewno włączona"
+      - switch.turn_on: termostat_wymiennika_kotlownia_k_on
+      - logger.log:
+          level: WARN
+          format: "Start Cool - termostat wymiennika w kotłowni on"                
+    idle_action:
+      - switch.turn_off: pompa_piec_na_drewno           
+      - logger.log:
+          level: WARN
+          format: "STOP - Pompa Pieca Na Drewno wyłączona"
+    default_preset: PIEC Na Drewno
+    preset:
+      - name: PIEC Na Drewno
+        default_target_temperature_high: 50 °C
+    visual:
+      min_temperature: 35 °C
+      max_temperature: 80 °C
+      temperature_step: 5 °C
+
+  - platform: thermostat
+    name: "Pompa do kotlowni"
+    id: pompa_do_kotlowni
+    min_cooling_off_time: 20s
+    min_cooling_run_time: 20s
+    sensor: temperatura_bufora
+    min_idle_time: 10s
+    cool_action:
+      - switch.turn_on: pompa_bufora_do_kotlowni      # pompa transport do kotłowni ON          
+      - logger.log:
+          level: WARN
+          format: "Start Cool - Pompa Pieca Na Drewno włączona"
+    idle_action:
+      - switch.turn_off: pompa_bufora_do_kotlowni     # pompa transport do kotłowni ON            
+      - logger.log:
+          level: WARN
+          format: "STOP - Pompa do kotłowni wyłączona"
+    default_preset: Pompa do kotlowni
+    preset:
+      - name: Pompa do kotlowni
+        default_target_temperature_high: 40 °C
+    visual:
+      min_temperature: 35 °C
+      max_temperature: 100 °C
+      temperature_step: 5 °C
+
+
+#   esptool.py --chip esp32 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dout --flash_size detect 0x0 pompa-factory.bin       
+
+# https://forums.raspberrypi.com/download/file.php?id=1879&sid=fd1d66625e77c9a9fea5dca96c027dc6   230V sensor     
+# https://europe1.discourse-cdn.com/arduino/original/3X/c/b/cbc2aef4324722b9137f3dc0c1f45e0a71c3d3bf.gif 
+
+# https://lastminuteengineers.com/esp32-pinout-reference/    
+
+# https://github.com/openhp/HeatPumpController
+# https://github.com/openhp/HeatPumpController/blob/main/m_Valden_Heat_Pump_Controller_model.jpg   schemat termometrów
+# https://www.youtube.com/watch?v=vrzG6mZl1i0 - Zasada działania bufora ciepła PCMX
+# https://www.hackster.io/valden-hw/valden-heat-pump-controller-a61505   - na adruino - fajny wymiennik 
+# https://www.hackster.io/gonzho/cheap-heat-pump-controller-chpc-0f2625
+# https://www.hackster.io/andrzejco/programmable-controller-for-the-heat-pump-0c75a3  ????
+
+# https://www.youtube.com/watch?v=1mzZCI73By0 trochę o COP
+# https://www.youtube.com/watch?v=CZDeEKObFBo przeźroczysty wymiennik i gość tłumaczy 
+# https://www.youtube.com/watch?v=xjKClsN_dL0 ESPHome - pompa ciepła - COP - obliczanie COP pompy ciepła w Home Assistant
+
+# COP https://community.home-assistant.io/t/heating-cop-calculation/498679/7
+
+
+############## Licznik ciepła
+# https://forum.arduino.cc/t/techem-compact-v-auslesen/633738   W artykule FHEM radio było 868MHz  https://forum.arduino.cc/uploads/short-url/5ZUQaquOrqzaWuuNsSWChnqsoG2.zip
+# https://github.com/wmbusmeters/wmbusmeters  (compact5) (non-standard protocol)
+
+# https://github.com/SzczepanLeon/esphome-components   
+# https://forum.arturhome.pl/t/watek-archiwalny-komponent-wm-bus-do-esphome-szczepanleon-starsze-wersje-do-1-5-1-wlacznie/7548/61
+# https://gist.github.com/KrzysztofHajdamowicz/199c815c3a7fe7d2b445ee801d70f90e
+# https://fhem.de/commandref_DE.html#TechemWZ
+   
+# Falownik elektroda https://www.elektroda.pl/rtvforum/topic3733393.html#18955702
+# https://microcontrollerslab.com/dspic33f-microcontroller-based-pure-sine-wave-inverter/   płatny kod
+# https://www.researchgate.net/publication/327288977_DsPic33f_Series_Microprocessor_Based_Single-Phase_Inverter_Design_and_Implementation
+# https://github.com/microchip-pic-avr-examples/dspic33ch-power-tppfc-dev-platform
+# https://www.elektroda.pl/rtvforum/topic110203-2550.html  wątek chłodniczy 
+
+# https://oemenergy.pl/blog/jaki-dobrac-bufor-do-pompy-ciepla/
+# Zakłada się, że pojemność zbiornika powinna wynosić co najmniej 10 l/kW mocy pompy ciepła, jeśli w budynku zastosowane jest ogrzewanie podłogowe i co najmniej 20 l/kW mocy pompy dla grzejników. Od tych wyliczeń należy odjąć ilość wody z układu pompy ciepła.
+# W przypadku, gdy do zbiornika za pomocą wymiennika będzie podłączone dodatkowe urządzenie grzewcze, np. kocioł gazowy, pojemność bufora należy dobrać dla źródła o większym zapotrzebowaniu na pojemność zbiornika.
+# Przykładowo, jeśli zdecydujesz się tylko na pompę ciepła o mocy 20 kW, która posiada układ wody wynoszący 240 l, powinieneś/aś wybrać bufor o pojemności co najmniej 160 l w przypadku, gdy montowana jest instalacja z grzejnikami. Przy czym, należy zaznaczyć, że jest to wartość minimalna, często zaleca się wybranie większego bufora, aby wydłużyć cykl pracy pompy, zmniejszając tym samym jej ilość załączeń.     
+
+# https://kupglikol.pl/glikol-etylenowy-200-litrow-20-stopni?
+# https://www.rynekinstalacyjny.pl/artykul/instalacje-wentylacyjne-klimatyzacyjne/20296,obliczenia-energetyczne-gruntowych-rurowych-wymiennikow-ciepla
+
+# https://www.youtube.com/watch?v=1DMC0w5GscA  - Układ 3-rurowy jest powszechniejszy na zachodzie Europy, u nas wciąż mało znany. Jakby ktoś chciał się doktoryzować to tutaj jest prawie 2-godzinny wykład o hydraulicznych tajnikach różnych konfiguracji buforów.
+# https://czysteogrzewanie.pl/jak-to-sie-robi/bufor-ciepla/
+# https://czysteogrzewanie.pl/jak-to-sie-robi/bufor-do-pompy-ciepla-kiedy-potrzebny-jaka-pojemnosc/
+
+# ruska elektroda https://radioskot.ru/
+
+
+############  Licznik energii
+# https://community.home-assistant.io/t/how-to-use-pzem004t-energy-monitor-with-esphome/107083/180  Licznik energii
+# https://tasmota.github.io/docs/PZEM-0XX/#hardware-connections
+
+# https://forum.arturhome.pl/t/dzienne-i-miesieczne-zuzycie/248/75?page=2
+
+#https://forum.arturhome.pl/t/esphome-krzywa-grzewcza/6741/2
+
+# https://www.youtube.com/watch?v=YZwcIC7y_H8
+
+
+# PCF LCD  http://akademia.nettigo.pl/starter_kit_030/
+# http://akademia.nettigo.pl/starter_kit_030/pcf8574.png
+# https://avrhelp.mcselec.com/index.html?lcd_i2c_pcf8574.htm
+#
+# 1
+# 2
+# 3
+# 4    0  Kompresor
+# 5    1  Pompa piec na drewno
+# 6    2  Pompy Rohtenbach
+# 7    3  Defrost
+# 8
+# 9
+# 10
+# 11   4  Pompa bufora do kotłowni
+# 12   5  FAN1
+# 13   6  FAN2
+# 14   7  LED
+# 15
+# 16
